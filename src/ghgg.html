@@ -1,0 +1,79 @@
+Akka fault tolerance and supervisor strategies
+In an actor system, each actor is the supervisor of its children. If an actor fails to handle a message, it suspends itself and all of its children and sends a message, usually in the form of an exception, to its supervisor.
+
+In Akka, supervisor strategies are the primary and straightforward mechanism for defining the fault tolerant behavior of your system.
+In Akka, the way in which a supervisor reacts to and handles exceptions that percolate up to it from its children is referred to as a supervisor strategy. Supervisor strategies are the primary and straightforward mechanism by which you define the fault tolerant behavior of your system.
+
+When a message signifying a failure reaches a supervisor, it can take one of the following actions:
+
+Resume the child (and its children), keeping its internal state. This strategy can be applied when the child state was not corrupted by the error and it can continue functioning correctly.
+Restart the child (and its children), clearing its internal state. This strategy can be used in the opposite scenario of the one just described. If the child state has been corrupted by the error, it is necessary the reset its state before it can be used in the Future.
+Stop the child (and its children) permanently. This strategy can be employed in cases where the error condition is not believed to be rectifiable, but does not jeopardize the rest of the operation being performed, which can be completed in the absence of the failed child.
+Stop itself and escalate the error. Employed when the supervisor does not know how to handle the failure and so it escalates it to its own supervisor.
+Moreover, an Actor can decide to apply the action just to the failed children or to its siblings as well. There are two pre-defined strategies for this:
+
+OneForOneStrategy: Applies the specified action to the failed child only
+AllForOneStrategy: Applies the specified action to all of its children
+Here’s a simple example, using the OneForOneStrategy:
+
+import akka.actor.OneForOneStrategy
+import akka.actor.SupervisorStrategy._
+import scala.concurrent.duration._
+ 
+override val supervisorStrategy =
+ OneForOneStrategy() {
+   case _: ArithmeticException      => Resume
+   case _: NullPointerException     => Restart
+   case _: IllegalArgumentException => Stop
+   case _: Exception                => Escalate
+ }
+If no strategy is specified, the following default strategy is employed:
+
+If there was an error while initializing the actor or if the actor was killed, the actor is stopped.
+If there was any other kind of exception, the actor is simply restarted.
+The Akka-supplied implementation of this default strategy is as follows:
+
+final val defaultStrategy: SupervisorStrategy = {
+  def defaultDecider: Decider = {
+    case _: ActorInitializationException ⇒ Stop
+    case _: ActorKilledException         ⇒ Stop
+    case _: Exception                    ⇒ Restart
+  }
+  OneForOneStrategy()(defaultDecider)
+}
+Akka allows for the implementation of custom supervisor strategies, but as the Akka documentation warns, do so with caution as incorrect implementations may lead to problems such as blocked actor systems (i.e. permanently suspended actors).
+
+Location transparency
+The Akka architecture supports location transparency, enabling actors to be entirely agnostic to where the messages that they receive originated. The sender of the message may reside in the same JVM as the actor or in a separate JVM (either running on the same node or a different node). Akka enables each of these cases to be handled in a manner that is completely transparent to the actor (and therefore the developer). The only caveat is that messages sent across multiple nodes must be serializable.
+
+The Akka architecture supports location transparency, enabling actors to be entirely agnostic to where the messages that they receive originated.
+Actor systems are designed to run in a distributed environment without requiring any specialized code. Akka only requires the presence of a configuration file (application.conf) that specifies the nodes to send messages to. Here’s a simple example of a configuration file:
+
+akka {
+  actor {
+    provider = "akka.remote.RemoteActorRefProvider"
+  }
+  remote {
+    transport = "akka.remote.netty.NettyRemoteTransport"
+    netty {
+      hostname = "127.0.0.1"
+      port = 2552
+    }
+  }
+}
+A few parting tips…
+We have seen how the Akka framework helps achieve concurrency and high performance. However, as this tutorial pointed out, there are a few points to keep in mind when designing and implementing your system in order to exploit the power of Akka to its fullest:
+
+To the greatest extent possible, each actor should be assigned the smallest task possible (as previously discussed, following the Single Responsibility Principle)
+Actors should handle events (i.e., process messages) asynchronously and should not block, otherwise context switches will happen which can adversely affect performance. Specifically, it is best to perform blocking operations (IO, etc.) in a Future so as not to block the actor; i.e.:
+
+  case evt => blockingCall() // BAD
+  case evt => Future {
+    blockingCall()           // GOOD
+  }
+Be sure your messages are all immutable, since the actors that pass them to one another will all be running concurrently in their own threads. Mutable messages are likely to result in unexpected behavior.
+Since messages sent between nodes must be serializable, it is important to bear in mind that the larger the messages are, the longer it will take to serialize, send, and deserialize them, which can negatively impact performance.
+Conclusion
+Akka, written in Scala, simplifies and facilitates the development of highly-concurrent, distributed, and fault tolerant applications, hiding much of the complexity from the developer. Doing Akka full justice would require much more than this single tutorial, but hopefully this introduction and its examples were sufficiently captivating to get you to want to read more.
+
+Amazon, VMWare, and CSC are but a few examples of leading companies who are actively using Akka. Visit the official Akka website to learn more and to explore whether Akka could be the right answer for your project as well.
